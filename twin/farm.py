@@ -213,7 +213,8 @@ def mesh(path, P, F, UV=None, double=False):
 
 def terrain():
     """Field terrain at 8 cm across the beds, plus a large low-resolution meadow around it."""
-    xs = np.arange(-50.0, 50.0 + 1e-6, 0.4)
+    fine = [np.arange(e - 1.0, e + 1.0, 0.05) for e in (LET_X[0], LET_X[1], MAI_X[0], MAI_X[1])]
+    xs = np.unique(np.round(np.concatenate([np.arange(-50.0, 50.0 + 1e-6, 0.4)] + fine), 4))
     ys = np.arange(-32.0, 32.0 + 1e-6, 0.08)
     X, Y = np.meshgrid(xs, ys, indexing="ij")
     Z = height(X, Y)
@@ -402,8 +403,8 @@ RB = f"{ROOT}/Isaac/Robots"
 A_RIDGE = f"{RB}/Clearpath/RidgebackUr/ridgeback_ur5.usd"
 A_UR5E = f"{RB}/UniversalRobots/ur5e/ur5e.usd"
 A_JACKAL = f"{RB}/Clearpath/Jackal/jackal.usd"
-A_DRONE = f"{RB}/Bitcraze/Crazyflie/cf2x.usd"
-DRONE_SCALE = 6.0                            # a Crazyflie scaled to a 0.65 m survey quadrotor
+X500 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "x500.npz")   # tools/convert_x500.py
+PROP_STEP = 47.0                             # degrees per frame: reads as a fast spin at 30 fps without strobing
 ARM_MOUNT = np.array([0.12, 0.34, 0.38])     # UR5e base on the rover (rover frame: x forward, y left = bed side)
 BIN = np.array([-0.24, -0.02, 0.28])         # weed bin on the rover deck (bin floor centre, rover frame)
 
@@ -436,7 +437,7 @@ def prim_box(path, size, pos, mat):
 
 def weed_bin(root):
     """Open-top bin made of five thin panels."""
-    L, Wd, Hh, t = 0.36, 0.30, 0.16, 0.008
+    L, Wd, Hh, t = 0.36, 0.30, 0.10, 0.008
     x, y, z = BIN
     prim_box(f"{root}/bin_floor", (L, Wd, t), (x, y, z + t / 2), M["bin"])
     prim_box(f"{root}/bin_n", (L, t, Hh), (x, y + Wd / 2, z + Hh / 2), M["bin"])
@@ -495,14 +496,25 @@ def build_targets():
 
 
 def build_drone():
-    x, t_, r_ = reference("/World/drone", A_DRONE, scale=DRONE_SCALE)
-    strip_physics("/World/drone")
-    vs = stage.GetPrimAtPath("/World/drone/asset").GetVariantSets()
-    for k_, v in (("Physics", "None"), ("Sensor", "None")):
-        if vs.HasVariantSet(k_):
-            vs.GetVariantSet(k_).SetVariantSelection(v)
+    """Holybro X500 (PX4's model, converted by tools/convert_x500.py): carbon frame, landing gear, four motors and
+    propellers; each rotor is its own xform on the motor axis so the propellers spin."""
+    d = np.load(X500)
+    x = UsdGeom.Xform.Define(stage, "/World/drone")
+    t_, r_ = x.AddTranslateOp(), x.AddRotateZOp()
+    spins = []
+    for i, pos in enumerate(d["rotor_pos"]):
+        rx = UsdGeom.Xform.Define(stage, f"/World/drone/rotor{i}")
+        rx.AddTranslateOp().Set(Gf.Vec3d(*map(float, pos)))
+        spins.append((rx.AddRotateZOp(), int(d["rotor_spin"][i])))
+    for k, name in enumerate(d["names"]):
+        r = int(d["rotor"][k])
+        path = f"/World/drone/{name}" if r < 0 else f"/World/drone/rotor{r}/{name}"
+        mm = mesh(path, d[f"v{k}"], d[f"f{k}"])
+        bind(mm.GetPrim(), pbr(f"x500_{name}", color=tuple(map(float, d["rgb"][k])), rough=float(d["rough"][k]),
+                               metal=float(d["metal"][k])))
+    prim_box("/World/drone/camera", (0.05, 0.07, 0.05), (0.06, 0.0, -0.045), M["camera"])   # survey camera
     label(stage.GetPrimAtPath("/World/drone"), "robot")
-    return {"t": t_, "r": r_}
+    return {"t": t_, "r": r_, "spins": spins}
 
 
 def build_jackal():
@@ -510,6 +522,64 @@ def build_jackal():
     strip_physics("/World/jackal")
     label(stage.GetPrimAtPath("/World/jackal"), "robot")
     return {"t": t_, "r": r_}
+
+
+_bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+
+
+def bbox(prim):
+    _bbox_cache.Clear()
+    return _bbox_cache.ComputeWorldBound(prim).ComputeAlignedRange()
+
+
+def wheel_spinners(root, pick, axis_world=(0.0, 1.0, 0.0)):
+    """Wheels that roll: for each wheel prim chosen by pick(prim, size) (built while the robot sits at the origin
+    facing +x), remember its centre and axle in its parent's frame, so a rotation by angle a about the axle through
+    the centre can be written into its own translate/orient ops each frame."""
+    out = []
+    for p in Usd.PrimRange(stage.GetPrimAtPath(root), Usd.TraverseInstanceProxies()):
+        if not p.IsA(UsdGeom.Xformable):
+            continue
+        b = bbox(p)
+        if b.IsEmpty() or not pick(p, b.GetSize()):
+            continue
+        if p.IsInstanceProxy():                                # make the instance editable
+            a = p
+            while a and not a.IsInstance():
+                a = a.GetParent()
+            a.SetInstanceable(False)
+            p = stage.GetPrimAtPath(p.GetPath())
+        t, o = p.GetAttribute("xformOp:translate"), p.GetAttribute("xformOp:orient")
+        if not (t.IsValid() and o.IsValid()):
+            continue
+        P2W = np.array(UsdGeom.Xformable(p).ComputeParentToWorldTransform(Usd.TimeCode.Default())).T
+        W2P = np.linalg.inv(P2W)
+        c = (W2P @ np.append(np.array(b.GetMidpoint()), 1.0))[:3]
+        ax = W2P[:3, :3] @ np.asarray(axis_world, float)
+        ax /= np.linalg.norm(ax)
+        t0 = np.array(t.Get(), float)
+        q0 = o.Get()
+        out.append({"prim": p, "c": c, "ax": ax, "t0": t0, "q0": np.array([q0.GetReal(), *q0.GetImaginary()]),
+                    "r": float(b.GetSize()[2]) / 2})
+    print("wheels found under", root, len(out), flush=True)
+    return out
+
+
+def spin_wheels(wheels, dist):
+    """Rotate every wheel by the angle that rolls it `dist` metres."""
+    for w in wheels:
+        a = dist / w["r"]
+        u = w["ax"]
+        K = np.array([[0, -u[2], u[1]], [u[2], 0, -u[0]], [-u[1], u[0], 0]])
+        R = np.eye(3) + math.sin(a) * K + (1 - math.cos(a)) * K @ K
+        t = w["c"] + R @ (w["t0"] - w["c"])
+        qr = np.array([math.cos(a / 2), *(math.sin(a / 2) * u)])
+        q0 = w["q0"]
+        q = np.array([qr[0] * q0[0] - qr[1:] @ q0[1:], *(qr[0] * q0[1:] + q0[0] * qr[1:] + np.cross(qr[1:], q0[1:]))])
+        T = np.eye(4)
+        T[:3, :3] = armk.qmat(q)
+        T[:3, 3] = t
+        _set_pose(w["prim"], T)
 
 
 def _set_pose(prim, T):
@@ -558,6 +628,12 @@ terrain()
 plant_field()
 margins()
 ROVER, WEEDS, DRONE, JACKAL = build_rover(), build_targets(), build_drone(), build_jackal()
+for _ in range(30):
+    app.update()
+# Ridgeback: its four wheels are meshes in the body (about 15 cm across, 8 cm wide); Jackal: its *_wheel_link prims
+ROVER["wheels"] = wheel_spinners("/World/rover/asset", lambda p, s: abs(s[0] - s[2]) < 0.01 and 0.12 < s[0] < 0.2
+                                 and s[1] < 0.1 and p.GetTypeName() == "Mesh")
+JACKAL["wheels"] = wheel_spinners("/World/jackal/asset", lambda p, s: p.GetName().endswith("wheel_link"))
 print(f"scene built in {time.time() - t0:.0f} s", flush=True)
 
 # sky: real HDRI of a farm field, plus a sun for crisp shadows
@@ -763,16 +839,20 @@ def apply(f):
     x, q, a, k, tp = ROVER_T.at(t)
     ROVER["t"].Set(Gf.Vec3d(float(x), 0.0, rover_z(x, 0.0)))
     pose_arm(ROVER, q, a)
+    spin_wheels(ROVER["wheels"], x - ROVER_T.stops[0] + 1.6)
     for i, Wd in enumerate(WEEDS):
         P = ROVER_T.weed_pose(i, t)
         set_pose(Wd, P if P is not None else tl.tz(*Wd["home"]))
     p, yaw = DRONE_T.at(t)
     DRONE["t"].Set(Gf.Vec3d(*map(float, p)))
     DRONE["r"].Set(math.degrees(yaw))
+    for op, sgn in DRONE["spins"]:
+        op.Set(float((sgn * PROP_STEP * f) % 360.0))
     jp, jyaw = tl.jackal_at(t, ground_z)
     jp[2] = rest_z(jp[0], jp[1], jyaw, JACKAL_WHEELS, JACKAL_LIFT)
     JACKAL["t"].Set(Gf.Vec3d(*map(float, jp)))
     JACKAL["r"].Set(math.degrees(jyaw))
+    spin_wheels(JACKAL["wheels"], (jp[1] - tl.JACKAL_Y0) / max(math.sin(jyaw), 0.5))
     eye, tgt, focal = camf(t, u)
     set_camera(eye, tgt, focal)
     dview = set_drone_cam(p, yaw)

@@ -70,13 +70,19 @@ variants per species (5 green lettuce, 3 red, 6 maize, 3 weed) are instanced wit
 | Robot | Asset | Placement |
 |---|---|---|
 | Weeding rover | Clearpath Ridgeback (its UR5 deactivated) + UR5e with Robotiq 2F-85 on a 10 cm pedestal at (0.12, 0.34, 0.38) on the deck, weed bin, camera mast | tramline, y = 0 |
-| Survey drone | quadrotor (Crazyflie model scaled to 0.65 m) | 11 m above the field |
+| Survey drone | Holybro X500 from PX4's model (25 meshes, 250k triangles), real size (0.5 m motor to motor) | 11 m above the field |
 | Scout | Clearpath Jackal | farm track |
 
 The assets carry rigid bodies, joints and articulation roots for physics; `strip_physics` disables them so the
 robots follow the timeline. Robots rest on their wheels: the body height is the highest ground under any of the four
 wheels plus the depth the asset's wheels reach below its origin (Ridgeback 2.6 cm, Jackal 6.6 cm), so no wheel
 sinks into the soil on the bed shoulders or in the track ruts.
+
+Wheels roll: at build time (robot at the origin) each wheel's centre and axle are expressed in its parent's frame
+(Ridgeback: the four wheel meshes in its body; Jackal: its `*_wheel_link` prims). Every frame the wheel is rotated
+about that axle through its centre by distance driven / wheel radius (7.6 cm and 10 cm), written back into its own
+translate and orient ops. The X500's four rotors are separate xforms on the motor axes; the propellers turn 47
+degrees per frame (opposite directions in diagonal pairs), which reads as a fast spin at 30 fps without strobing.
 
 ## 6. Weeding cycle (`twin/timeline.py`)
 
@@ -99,7 +105,7 @@ on one posture branch from a fixed elbow-up home. The jaw yaw follows the arm's 
 barely moves. Checked offline: largest joint step 7.8 degrees per frame, largest tool step 6.6 cm per frame.
 
 The weed's pose relative to the tool at the grasp is stored, so while held it hangs from the gripper exactly as it
-was picked; on release it drops into the bin over 0.25 s, shrinking to 60% (wilted), at a slot that fills the bin
+was picked; on release it drops into the bin over 0.25 s, shrinking to 50% (wilted), at a slot that fills the bin
 in a 3 x 2 grid, then rides with the rover.
 
 ## 7. Drone and synthetic data

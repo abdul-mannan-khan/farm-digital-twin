@@ -13,7 +13,7 @@ import arm as armk
 
 FPS = 30
 DRIVE_T = 2.2                       # s between two weeds
-BIN_SCALE = 0.6                     # pulled weeds wilt and fold up in the bin
+BIN_SCALE = 0.5                     # pulled weeds wilt and fold up in the bin
 DRONE_SPEED, DRONE_Z = 6.0, 11.0
 JACKAL_X, JACKAL_Y0, JACKAL_V = 1.0, -26.0, 0.75     # drives north along the farm track beside the maize
 
@@ -133,8 +133,8 @@ class Rover:
             self.rel.append(np.linalg.inv(tcp) @ tz(x, y, wz))
         self.cycle = DRIVE_T + self.pp[0].T
         r = np.random.default_rng(5)
-        self.in_bin = [tz(self.bin[0] + (-0.09 + 0.09 * (k % 3)) + r.uniform(-0.02, 0.02),
-                          self.bin[1] + (-0.06 + 0.12 * ((k // 3) % 2)) + r.uniform(-0.02, 0.02),
+        self.in_bin = [tz(self.bin[0] + (-0.08 + 0.08 * (k % 3)) + r.uniform(-0.01, 0.01),
+                          self.bin[1] + (-0.035 + 0.07 * ((k // 3) % 2)) + r.uniform(-0.01, 0.01),
                           self.bin[2] + 0.012 + 0.015 * (k // 6)) @ rotz(r.uniform(0, 2 * np.pi))
                        @ np.diag([BIN_SCALE, BIN_SCALE, BIN_SCALE, 1.0]) for k in range(len(targets))]
 
@@ -244,7 +244,7 @@ def make_shots(rover, drone, ground):
         p, yaw = drone.at(t)
         back = np.array([math.cos(yaw), math.sin(yaw), 0.0])
         side = np.array([-math.sin(yaw), math.cos(yaw), 0.0])
-        return p - 5.5 * back + 1.8 * side + [0, 0, 2.4], p + 4.0 * back - [0, 0, 1.8], 26
+        return p - 3.6 * back + 1.2 * side + [0, 0, 1.3], p + 3.0 * back - [0, 0, 1.0], 26
 
     def rover_wide(t, u):
         x = rover.at(t)[0]

@@ -48,12 +48,16 @@ of the kind used to train crop and weed detectors.
   (`twin/timeline.py`, `WeedPick`) follows its Cartesian path with IK solved step by step from the previous step,
   sweeping round the base on an arc for the long moves, so the arm stays on one smooth posture: joint steps stay
   under 8 degrees per frame and the weed hangs from the gripper exactly as it was grasped.
-* **Survey drone** (a quadrotor) flies a lawnmower survey at 11 m with rounded turns. Its downward camera is a second
+* **Survey drone**: a Holybro X500, built from PX4's official model (`tools/convert_x500.py` converts its
+  meshes: carbon frame, landing gear, motors and propellers), flies a lawnmower survey at 11 m with rounded turns;
+  its propellers spin. Its downward camera is a second
   Replicator render product with three annotators: RGB, distance to the image plane and semantic segmentation.
   Weed boxes come from the scene's ground truth projected through the camera model.
 * **Clearpath Jackal** scouting along the maize block from the farm track.
 
 The assets' physics (rigid bodies, joints, articulations) is switched off so the robots follow the timeline exactly.
+The robots rest on their wheels (never sinking into the soil) and the wheels roll with the distance driven: each
+wheel turns about its axle through its own centre by distance / radius.
 
 ## Run it with Docker
 
@@ -116,10 +120,12 @@ weeding cycle's IK, drone data, shot list, performance and limitations), are in 
 * `twin/farm.py` - the Isaac Sim scene (terrain, crops, margins, sky, robots), drone camera data and overlay
 * `twin/timeline.py` - weeding cycle, drone survey, Jackal route and camera shots (numpy only)
 * `twin/arm.py` - UR5e forward and inverse kinematics and the Robotiq 2F-85 finger linkage
+* `twin/assets/x500.npz`, `tools/convert_x500.py` - the Holybro X500 drone converted from PX4's model
 * `tests/test_offline.py`, `tests/run_tests.py` - checks that run without Isaac Sim (plant meshes, arm reach and
   smoothness, weed hand-over to the bin, drone speed, film length)
 * `docker/` - Dockerfile, entrypoint (preview, frames, render, test, shell) and Compose file
 * `twin/run_all.sh`, `twin/watchdog.sh`, `twin/fix_driver.sh`, `twin/get_assets.sh` - cloud rendering helpers
 * `twin/probe.py` - prints the prim tree and sizes of the robot assets (used to place them)
 
-Textures and HDRI: Poly Haven (CC0). Robot and vegetation assets: NVIDIA Isaac Sim asset library.
+Textures and HDRI: Poly Haven (CC0). Robot and vegetation assets: NVIDIA Isaac Sim asset library. Holybro X500
+model: [PX4-gazebo-models](https://github.com/PX4/PX4-gazebo-models) (BSD-3-Clause, Copyright PX4 Development Team).

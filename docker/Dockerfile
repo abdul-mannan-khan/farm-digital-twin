@@ -16,6 +16,8 @@ ENV ACCEPT_EULA=Y \
     FARM_OUT=/out
 
 USER root
+# ffmpeg encodes the film; the Isaac Sim base image does not ship it
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg wget curl     && rm -rf /var/lib/apt/lists/*
 WORKDIR /farm
 COPY twin/ /farm/twin/
 COPY tests/ /farm/tests/
