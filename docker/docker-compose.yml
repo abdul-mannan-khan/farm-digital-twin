@@ -1,0 +1,21 @@
+# docker compose -f docker/docker-compose.yml run --rm farm preview   (or: render, test, frames 100,900)
+services:
+  farm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: farm-twin
+    volumes:
+      - ../out:/out
+      - isaac-cache:/root/.cache          # shader and texture caches: later runs start much faster
+    environment:
+      - RES=1920x1080
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, graphics, compute, utility, video]
+volumes:
+  isaac-cache:

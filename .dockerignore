@@ -1,0 +1,6 @@
+out/
+.git/
+**/__pycache__/
+media/
+*.mp4
+*.gif
